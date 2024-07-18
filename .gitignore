@@ -1,3 +1,4 @@
 **/.vs/*
 **/bin/*
 **/obj/*
+/HabitTracker/habitsdb.sqlite3
