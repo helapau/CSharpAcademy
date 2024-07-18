@@ -1,10 +1,15 @@
-﻿using System;
-using System.Linq;
-using System.Text;
+﻿using System.Text;
 
 namespace CSharpAcademy.MathGame
 {
     internal record GameRecord(string questions, int score);
+
+    enum Arithmetic { 
+        Add,
+        Subtract,
+        Multiply,
+        Divide
+    }
 
     internal class Game
     {
@@ -15,6 +20,24 @@ namespace CSharpAcademy.MathGame
         int totalRounds = 5;
 
         public Game() { }
+
+        string GetSymbol(Arithmetic operation) => operation switch
+        {
+            Arithmetic.Add => "+",
+            Arithmetic.Subtract => "-",
+            Arithmetic.Multiply => "*",
+            Arithmetic.Divide => "/",
+            _ => throw new NotImplementedException()
+        };
+
+        private int CalculateResult(Arithmetic operation, int a, int b) => operation switch
+        {
+            Arithmetic.Add => a + b,
+            Arithmetic.Subtract => a - b,
+            Arithmetic.Multiply => a * b,
+            Arithmetic.Divide => a / b,
+            _ => throw new NotImplementedException()
+        };
 
         /// <summary>
         /// Return a pseudo random int between 0 and 10
@@ -39,46 +62,55 @@ namespace CSharpAcademy.MathGame
             return result.ToString();
         }
 
-
-        private void ArithmeticOperation(int score, int round, string symbol, Func<int, int, int> operationCallback, List<string> questions)
+        private int GetUserInputAsInt()
         {
-            
-            if (round == totalRounds + 1)
-            {
-                Console.WriteLine($"Congrats you won this addition game! Your score is: {score}");
-                previousGames.Add(new GameRecord(JoinQuestions(questions), score));
-                return;
-            }
-
-            var (a, b) = GenerateNumbersForOperation(symbol);
-            string question = $"{a} {symbol} {b}";            
-            Console.WriteLine(question);
-            questions.Add(question);       
-            
-            string? response = Console.ReadLine();
-            int guess;
-            int result = operationCallback(a, b);
-            if (response is string && int.TryParse(response, out guess))
-            {
-                if (guess == result)
-                {
-                    ArithmeticOperation(score + 1, round + 1, symbol, operationCallback, questions);
+            int guess = -1;
+            bool isParsed = false;
+            do {
+                string? input = Console.ReadLine();
+                if (input is string && int.TryParse(input, out guess)) {
+                    isParsed = true;
                 }
-                else
+                else {
+                    Console.WriteLine("Please enter a valid integer.");
+                }
+            } while (isParsed is false);
+            return guess;
+        }
+
+        private void ArithmeticOperation(Arithmetic operation, List<string> questions)
+        {
+            int score = 0;
+            string symbol = GetSymbol(operation);
+            for (; score < totalRounds; score++)
+            {
+                var (a, b) = GenerateNumbersForOperation(operation);
+                string question = $"{a} {symbol} {b}";
+                Console.WriteLine(question);
+                questions.Add(question);                
+                int guess = GetUserInputAsInt();
+                int result = CalculateResult(operation, a, b);
+                if (guess != result)
                 {
                     Console.WriteLine($"Game over! Your total score is: {score}");
-                    previousGames.Add(new GameRecord(JoinQuestions(questions), score));
-                    return;
-                }
+                    break;                    
+                }               
+            }
+            previousGames.Add(new GameRecord(JoinQuestions(questions), score));
+            if (score == totalRounds)
+            {
+                Console.WriteLine($"Congrats you won this game! Your score is: {score}");
             }
         }
 
-        private (int, int) GenerateNumbersForOperation(string symbol)
+
+        
+        private (int, int) GenerateNumbersForOperation(Arithmetic operation)
         {
             int b = GetRandomInt();
             int a;
 
-            if (symbol == "/")
+            if (operation == Arithmetic.Divide)
             {
                 b++;
                 a = b * 1 * GetRandomInt();                
@@ -90,13 +122,6 @@ namespace CSharpAcademy.MathGame
             return (a, b);            
         }       
 
-
-        private int Add(int a, int b) => a + b;
-        private int Subtract(int a, int b) => a - b;
-        private int Multiply(int a, int b) => a * b;
-        private int Divide(int a, int b) => a / b;
-
-        
 
         void ViewPrevious()
         {
@@ -130,19 +155,9 @@ namespace CSharpAcademy.MathGame
 
         private void PickNumberOfRounds()
         {
-            Console.WriteLine("Enter an integer:");
-            string? input = Console.ReadLine();
-            int userDefinedRounds;
-            if (input is string && int.TryParse(input, out userDefinedRounds))
-            {
-                totalRounds = userDefinedRounds;
-                return;
-            }
-            else
-            {
-                Console.WriteLine("Number of rounds must be an integer. Try again.");
-                PickNumberOfRounds();
-            }
+            Console.WriteLine("Enter an integer:");           
+            int userDefinedRounds = GetUserInputAsInt();
+            totalRounds = userDefinedRounds;            
         }
 
         private void WriteMainMenu()
@@ -164,20 +179,20 @@ namespace CSharpAcademy.MathGame
             while (isOn)
             {
                 WriteMainMenu();
-                string choice = Console.ReadLine();
+                string choice = Console.ReadLine();                
                 switch (choice.ToUpper())
                 {
                     case "A":
-                        ArithmeticOperation(0, 1, "+", Add, new List<string>());
+                        ArithmeticOperation(Arithmetic.Add, new List<string>());
                         break;
                     case "S":
-                        ArithmeticOperation(0, 1, "-", Subtract, new List<string>());
+                        ArithmeticOperation(Arithmetic.Subtract, new List<string>());
                         break;
                     case "M":
-                        ArithmeticOperation(0, 1, "*", Multiply, new List<string>());
+                        ArithmeticOperation(Arithmetic.Multiply, new List<string>());
                         break;
                     case "D":
-                        ArithmeticOperation(0, 1, "/", Divide, new List<string>());
+                        ArithmeticOperation(Arithmetic.Divide, new List<string>());
                         break;
                     case "Q":
                         isOn = false;
@@ -189,7 +204,7 @@ namespace CSharpAcademy.MathGame
                         PickNumberOfRounds();
                         break;
                     default:
-                        Console.WriteLine("Unknown command: ", choice);
+                        Console.WriteLine($"Unknown command: {choice}");
                         break;
                 }
             }
