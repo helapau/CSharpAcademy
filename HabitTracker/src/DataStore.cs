@@ -7,116 +7,254 @@ using Microsoft.Data.Sqlite;
 
 namespace HabitTracker.src
 {
-    public record HabitRecord(string HabitName, long Timestamp, int Amount, string AccomplishmentMessage);
-    internal static class DataStore
+    public record struct HabitRecord(string Date, int Amount);
+    
+    internal class DataStore
     {
-        public static readonly string DBName = "habitsdb.sqlite3";
-        public static readonly string DbFilePath = Path.Combine(AppSettings.PROJECT_ROOT_DIR, DBName);
-        public static readonly string ConnectionString = $"Data Source={DBName}";
-        public static readonly string TableName = "HabitTracker";
+        // the driver creates the Database if it doesn't exist
+        // it uses pooling by deafult so the open connection is reused
+        private static readonly string ConnectionString = $"Data Source={Path.Combine(AppSettings.PROJECT_ROOT_DIR, "habitsdb.sqlite3")}";
+
+        private static readonly string HabitsTable = "Habits";
+        private static readonly string HabitLogsTable = "HabitLogs";        
         
-        public static bool DBFileExists()
+
+        private static void CreateHabitsTableIfNotExists()
         {
-            if (!Path.Exists(AppSettings.PROJECT_ROOT_DIR))
-            {
-                throw new Exception("Project root directory does not exist!");
-            }            
-            return Path.Exists(DbFilePath);            
-        }       
-
-        public static void EnsureDBCreated()
-        {
-            if (!DBFileExists())
-            {
-                File.WriteAllText(DbFilePath, string.Empty);
-            }
-        }
-
-        public static bool TableExists(string tableName)
-        { 
-            EnsureDBCreated();
-
-            bool tableExists = true;
-            using (var connection = new SqliteConnection(ConnectionString))
-            {
-                connection.Open();
-
-                var command = connection.CreateCommand();
-                command.CommandText = @"SELECT HabitName FROM HabitTracker";               
-                try
-                {
-                    command.ExecuteNonQuery();
-                }
-                catch (SqliteException e)
-                {
-                    tableExists = !e.Message.Contains("no such table", StringComparison.CurrentCultureIgnoreCase); // will be something like "no such table 'tableName' or 'tableName' already exists                     
-                }
-            }
-            return tableExists;
-        }
-
-        public static void CreateHabitsTable()
-        {
-            if (TableExists(TableName))
-                return;
+            var commandBuilder = new StringBuilder();
+            commandBuilder.Append("CREATE TABLE IF NOT EXISTS " + HabitsTable + " ");
+            commandBuilder.Append(@"
+                    (                        
+                        Name TEXT NOT NULL PRIMARY KEY
+                    )
+            ");
 
             using (var connection = new SqliteConnection(ConnectionString))
             {
                 connection.Open();
 
-                var command = connection.CreateCommand();
-                command.CommandText =
-                    @"CREATE TABLE HabitTracker(
-                        HabitName TEXT NOT NULL,
-                        Timestamp INTEGER NOT NULL,
+                var command = connection.CreateCommand();                
+                command.CommandText = commandBuilder.ToString();
+                command.ExecuteNonQuery();
+            }
+        } 
+
+        private static void CreateHabitLogsTableIfNotExists()
+        {
+            var commandBuilder = new StringBuilder();
+            commandBuilder.Append("CREATE TABLE IF NOT EXISTS " + HabitLogsTable + " ");
+            commandBuilder.Append(@"
+                    (
+                        HabitName INTEGER NOT NULL,
                         Amount INTEGER NOT NULL,
-                        AccomplishmentMessage TEXT NOT NULL
-                    )";
+                        Date TEXT NOT NULL PRIMARY KEY,
+	                ");
+            commandBuilder.Append($"FOREIGN KEY(HabitName) REFERENCES {HabitsTable}(Name)");
+            commandBuilder.Append(");");
 
-                command.ExecuteNonQuery();
-            }
-        }
-
-        public static void Insert()
-        {
-            var testRecord = new HabitRecord("Sit-ups", DateTimeOffset.Parse("2024-07-18").ToUnixTimeSeconds(), 0, "I haven't done any sit-ups today :(");
-            using (var connection = new SqliteConnection(ConnectionString))
-            {
-                connection.Open();
-
-                var command = connection.CreateCommand();
-                command.CommandText = @"
-                    INSERT INTO HabitTracker
-                    VALUES (@HabitName, @TimeStamp, @Amount, @Msg);
-";
-                command.Parameters.AddWithValue("@HabitName", testRecord.HabitName);
-                command.Parameters.AddWithValue("@TimeStamp", testRecord.Timestamp);
-                command.Parameters.AddWithValue("@Amount", testRecord.Amount);
-                command.Parameters.AddWithValue("@Msg", testRecord.AccomplishmentMessage);
-
-                command.ExecuteNonQuery();
-            }
-        }
-
-        public static void Select()
-        {
             using (var connection = new SqliteConnection(ConnectionString))
             {
                 connection.Open();
                 var command = connection.CreateCommand();
-                command.CommandText = @"SELECT HabitName FROM " + TableName + ";";
+                command.CommandText = commandBuilder.ToString();
+                command.ExecuteNonQuery();
+            }
+        }
+
+        public DataStore()
+        {
+            CreateHabitsTableIfNotExists();
+            CreateHabitLogsTableIfNotExists();            
+        }
+
+        /// <summary>
+        /// Insert a new row into the HabitsTable
+        /// </summary>
+        public void AddHabit(string name)
+        {
+            
+            using (var connection = new SqliteConnection(ConnectionString))
+            {
+                connection.Open();
+                var command = connection.CreateCommand();
+                command.CommandText = $"INSERT INTO {HabitsTable} (Name)" + @"
+                    VALUES (@name)
+                ";
+                command.Parameters.AddWithValue("name", name);
+                command.ExecuteNonQuery();
+            }
+        }
+
+        public List<string> ListAllHabits()
+        {
+            List<string> result = new();
+            using (var connection = new SqliteConnection(ConnectionString))
+            {
+                connection.Open();
+                var command = connection.CreateCommand();
+                command.CommandText = $"SELECT Name FROM {HabitsTable}";
                 using (var reader = command.ExecuteReader())
                 {
                     while (reader.Read())
                     {
-                        Console.WriteLine(reader.GetString(0));
+                        result.Add(reader.GetString(0));
                     }
                 }
+
+            }
+                return result;
+        }
+
+        public void DeleteHabit(string name)
+        {
+            using (var connection = new SqliteConnection(ConnectionString))
+            {
+                connection.Open();
+                var deleteLogs = connection.CreateCommand();
+                deleteLogs.CommandText = $@"
+                    DELETE FROM {HabitLogsTable} WHERE HabitName = @name;
+                ";
+                deleteLogs.Parameters.AddWithValue("name", name);
+                deleteLogs.ExecuteNonQuery();
+
+                var command = connection.CreateCommand();
+                command.CommandText = @$"DELETE FROM {HabitsTable} WHERE Name = @name";
+                command.Parameters.AddWithValue("name", name);
+                command.ExecuteNonQuery();
             }
         }
 
-        
+        public List<HabitRecord> ViewLogsForHabit(string habit)
+        {
+            List<HabitRecord> result = new();
+            using (var connextion = new SqliteConnection(ConnectionString))
+            { 
+                connextion.Open();
+                var command = connextion.CreateCommand();                
+                command.CommandText = @$"
+                    SELECT Amount, Date
+                    FROM {HabitLogsTable}                    
+                    WHERE HabitName = @habit
+                ";
+                command.Parameters.AddWithValue("habit", habit);
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        int amount = reader.GetInt32(0);
+                        string date = reader.GetString(1);
+                        result.Add(new HabitRecord(date, amount));                       
+                    }
+                }
+            }
+            return result;
+        }
 
+        /// <summary>
+        /// Returns today's date in the local format
+        /// </summary>
+        /// <returns>string</returns>
+        public static string GetToday() => DateTime.Today.ToString().Split(" ")[0];
 
+        public HabitRecord? GetLogForDate(string habit, string date)
+        {             
+            HabitRecord? record = null;
+            using (var connection = new SqliteConnection(ConnectionString))
+            {
+                connection.Open();
+                var command = connection.CreateCommand();
+                command.CommandText = $@"
+                    SELECT Amount, Date FROM {HabitLogsTable}
+                    WHERE HabitName = @habit
+                    AND Date = @today
+                ";
+                command.Parameters.AddWithValue("habit", habit);
+                command.Parameters.AddWithValue("today", date);
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        record = new(reader.GetString(1), reader.GetInt32(0));
+                    }
+                }                
+            }
+            return record;
+        }
+
+        public void UpsertLogForHabit(string habit, int amount)
+        {
+            
+            using (var conn = new SqliteConnection(ConnectionString))
+            {
+                conn.Open();
+                string today = GetToday();
+                HabitRecord? todaysRecordMaybe = GetLogForDate(habit, today);                
+                if (todaysRecordMaybe is not null)
+                {
+
+                    UpdateLogForHabit(habit, amount, today);
+                }
+                else
+                {
+                    List<string> habits = ListAllHabits();
+                    if (!habits.Contains(habit))
+                    {
+                        AddHabit(habit);
+                    }
+                    string date = GetToday();
+                    var command = conn.CreateCommand();
+                    command.CommandText = $@"
+                    INSERT INTO {HabitLogsTable} (HabitName, Amount, Date)
+                    VALUES (@name, @amount, @date)                    
+                    ";
+                    command.Parameters.AddWithValue("amount", amount);
+                    command.Parameters.AddWithValue("date", date);
+                    command.Parameters.AddWithValue("name", habit);
+                    command.ExecuteNonQuery();
+                }                
+            }
+        }
+
+        public void DeleteLogForHabit(string habit, string date)
+        {
+            using (var conn = new SqliteConnection(ConnectionString))
+            {
+                conn.Open();
+
+                var deleteHabit = conn.CreateCommand();
+                deleteHabit.CommandText = $@"
+                    DELETE FROM {HabitLogsTable}
+                    WHERE HabitName = @name                    
+                    AND Date = @date
+                ";
+                deleteHabit.Parameters.AddWithValue("name", habit);
+                deleteHabit.Parameters.AddWithValue("date", date);
+                deleteHabit.ExecuteNonQuery();
+            }
+        }
+
+        public void UpdateLogForHabit(string habit, int amount, string date)
+        {
+            HabitRecord? recordMaybe = GetLogForDate(habit, date);
+            if (recordMaybe is null)
+            {
+                return;
+            }
+            using (var conn = new SqliteConnection(ConnectionString))
+            { 
+                conn.Open();
+                var command = conn.CreateCommand();
+                command.CommandText = $@"
+                    UPDATE {HabitLogsTable}
+                    SET Amount = @amount                        
+                    WHERE HabitName = @habit
+                    AND Date = @date;                    
+                ";
+                command.Parameters.AddWithValue("amount", amount);
+                command.Parameters.AddWithValue("date", date);
+                command.Parameters.AddWithValue("habit", habit);
+                command.ExecuteNonQuery();
+            }
+        }
     }
 }
